@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  mongo:
+    image: mongo
+  wgc:
+    image: wgc
+    ports:
+      - 51820:51820/udp
+    cap_add:
+    - NET_ADMIN
+    - SYS_MODULE
+  wgb:
+    image: wgb
+    depends_on:
+      - wgc
+      - mongo
+    environment:
+      - APP_endpoint=192.168.3.8

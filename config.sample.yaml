@@ -1,0 +1,12 @@
+private_key: ''
+public_key: ''
+
+endpoint: '127.0.0.1'
+port: 51820
+
+bot_name: 'WednesdayVPN'
+bot_token: ''
+admin_id: -1
+
+post_up: iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+pre_down: iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE

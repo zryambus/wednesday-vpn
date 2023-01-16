@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package wireguard_control;
+
+message Client {
+    string key = 1;
+    uint32 ip = 2;
+}
+
+message Server {
+    string key = 1;
+    uint32 ip = 2;
+    uint32 port = 3;
+    uint32 subnet = 4;
+    repeated uint32 dns = 5;
+    string post_up = 6;
+    string pre_down = 7;
+}
+
+
+message SyncConfigRequest {
+    Server server = 1;
+    repeated Client clients = 2;
+}
+
+message SyncConfigResponse {
+}
+
+message StartWireguardRequest {
+    Server server = 1;
+}
+
+message StartWireguardResponse {
+}
+
+service WireguardControl {
+    rpc SyncConfig(SyncConfigRequest) returns (SyncConfigResponse) {}
+    rpc StartWireguard(StartWireguardRequest) returns (StartWireguardResponse) {}
+}
