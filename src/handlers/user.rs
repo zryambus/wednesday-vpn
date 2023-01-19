@@ -9,7 +9,12 @@ use teloxide::{
 use anyhow::{Result, anyhow};
 use rand::Rng;
 
-use crate::{cfg::CfgPtr, storage::{StoragePtr, Invite}, wireguard::config::{PeerConfig, build_peer_config}, control_client::sync_config};
+use crate::{
+    cfg::CfgPtr,
+    storage::{StoragePtr, Invite, UserStatus},
+    wireguard::config::{PeerConfig, build_peer_config},
+    control_client::sync_config
+};
 use super::AddProfileDialogueState;
 
 #[derive(Default, Clone, BotCommands)]
@@ -18,7 +23,8 @@ pub enum UserCommands {
     #[default]
     Start,
     ID,
-    Invite{ id: String }
+    Invite{ id: String },
+    RequestAccess,
 }
 
 pub fn get_process_error(bot: Bot, chat_id: ChatId) -> Box<dyn Fn(String) -> Box<dyn FnOnce(anyhow::Error) -> anyhow::Error + Send> + Send> {
@@ -36,45 +42,78 @@ pub fn get_process_error(bot: Bot, chat_id: ChatId) -> Box<dyn Fn(String) -> Box
     })
 }
 
-pub async fn on_command(bot: Bot, msg: Message, storage: StoragePtr, cmd: UserCommands) -> Result<()> {
+pub async fn on_command(bot: Bot, msg: Message, storage: StoragePtr, cfg: CfgPtr, cmd: UserCommands) -> Result<()> {
     let chat_id = msg.chat.id;   
     let user_id = UserId(chat_id.0 as u64);
     let process_error = get_process_error(bot.clone(), chat_id);
+    let user_status = storage.get_user_status(user_id).await?;
 
     match cmd {
         UserCommands::Start => {
-            if !storage.is_active_user(user_id).await? {
-                bot.send_message(chat_id, "Access denied").send().await?;
-                return Ok(())
+            match user_status {
+                UserStatus::Granted => {
+                    bot.send_message(chat_id, "Access denied").send().await?;
+                    return Ok(())
+                },
+                _ => {
+                    let keyboard: Vec<Vec<InlineKeyboardButton>> = vec![
+                        vec![
+                            InlineKeyboardButton::callback(
+                                "Manage profiles".to_string(),
+                                serde_json::to_string(&UserCallbackQuery::ManageProfiles{}).unwrap()
+                            ),
+                        ]
+                    ];
+                    bot.send_message(msg.chat.id, "Ready to go")
+                        .reply_markup(InlineKeyboardMarkup::new(keyboard))
+                        .send().await?;
+                }
             }
-
-            let keyboard: Vec<Vec<InlineKeyboardButton>> = vec![
-                vec![
-                    InlineKeyboardButton::callback(
-                        "Manage profiles".to_string(),
-                        serde_json::to_string(&UserCallbackQuery::ManageProfiles{}).unwrap()
-                    ),
-                ]
-            ];
-            bot.send_message(msg.chat.id, "Ready to go")
-                .reply_markup(InlineKeyboardMarkup::new(keyboard))
-                .send().await?;
         },
         UserCommands::ID => {
             bot.send_message(msg.chat.id, format!("Your id: {}", msg.chat.id)).send().await?;
         },
         UserCommands::Invite { id } => {
-            let user = storage.get_user(user_id).await?;
-            if user.is_some() {
-                bot.send_message(chat_id, "You are already has access").send().await?;
-                return Ok(());
+            match user_status {
+                UserStatus::Granted => {
+                    bot.send_message(chat_id, "You are already has access").send().await?;
+                    return Ok(());
+                },
+                UserStatus::Restricted => {
+                    bot.send_message(chat_id, "Go away").send().await?;
+                    return Ok(());
+                },
+                _ => {
+                    let invite = Invite{ id };
+                    storage.activate_user(user_id, invite).await
+                        .map_err(process_error("Failed to apply invite".into()))?;
+        
+                    bot.send_message(chat_id, "Access granted").send().await?;
+                }
             }
+        },
+        UserCommands::RequestAccess => {
+            match user_status {
+                UserStatus::Restricted => {
+                    bot.send_message(chat_id, "Go away").send().await?;
+                    return Ok(());
 
-            let invite = Invite{ id };
-            storage.activate_user(user_id, invite).await
-                .map_err(process_error("Failed to apply invite".into()))?;
-
-            bot.send_message(chat_id, "Access granted").send().await?;
+                },
+                UserStatus::Requested => {
+                    bot.send_message(chat_id, "You are already requested for access").send().await?;
+                    return Ok(());
+                },
+                UserStatus::Granted => {
+                    bot.send_message(chat_id, "You are already has access").send().await?;
+                    return Ok(());
+                },
+                UserStatus::None => {
+                    storage.update_user_status(user_id, UserStatus::Requested).await?;
+                    bot.send_message(chat_id, "Request sent").send().await?;
+                    bot.send_message(ChatId(cfg.admin_id as i64), "New access request were recieved").send().await?;
+                    return Ok(());
+                },
+            }
         }
     }
     Ok(())

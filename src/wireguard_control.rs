@@ -124,7 +124,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .try_init()
         .unwrap();
         
-    let address = "1.2.3.4:8080".parse().unwrap();
+    let address = "0.0.0.0:8080".parse().unwrap();
     let wg_control_server = WireguardControlServer{};
 
     tonic::transport::Server::builder()

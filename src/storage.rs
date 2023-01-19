@@ -35,10 +35,20 @@ impl Invite {
     }
 }
 
+#[derive(Serialize, Deserialize, Default, Debug)]
+#[repr(u8)]
+pub enum UserStatus {
+    #[default]
+    None,
+    Requested,
+    Granted,
+    Restricted,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct User {
     pub user_id: String,
-    pub active: bool,
+    pub status: UserStatus,
 }
 
 #[derive(Clone)]
@@ -145,10 +155,15 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn get_user(&self, user_id: UserId) -> Result<Option<User>> {
+    pub async fn get_user(&self, user_id: UserId) -> Result<User> {
         let filter = doc!{ "user_id": user_id.to_string() };
         let user = self.users_collection().find_one(filter, None).await?;
-        Ok(user)
+        if user.is_none() {
+            let new_user = User{ user_id: user_id.to_string(), status: UserStatus::None };
+            self.users_collection().insert_one(&new_user, None).await?;
+            return Ok(new_user);
+        }
+        Ok(user.unwrap())
     }
 
     pub async fn activate_user(&self, user_id: UserId, invite: Invite) -> Result<()> {
@@ -160,20 +175,21 @@ impl Storage {
 
         let user = User{
             user_id: user_id.to_string(),
-            active: true,
+            status: UserStatus::Granted,
         };
 
-        self.users_collection().insert_one(&user, None).await?;
+        let _user = self.get_user(user_id).await?;
+        
+        let query = doc!{ "user_id": user_id.to_string() };
+        let update = doc!{ "$set": { "status": UserStatus::Granted as u32 } };
+        self.users_collection().update_one(query, update, None).await?;
 
         Ok(())
     }
 
-    pub async fn is_active_user(&self, user_id: UserId) -> Result<bool> {
+    pub async fn get_user_status(&self, user_id: UserId) -> Result<UserStatus> {
         let user = self.get_user(user_id).await?;
-        if user.is_some() && user.unwrap().active {
-            return Ok(true);
-        }
-        Ok(false)
+        Ok(user.status)
     }
 
     pub async fn create_invite_code(&self) -> Result<Invite> {
@@ -184,6 +200,13 @@ impl Storage {
 
     pub async fn revoke_all_invite_codes(&self) -> Result<()> {
         self.invites_collection().delete_many(doc!{}, None).await?;
+        Ok(())
+    }
+
+    pub async fn update_user_status(&self, user_id: UserId, status: UserStatus) -> Result<()> {
+        let query = doc!{ "user_id": user_id.to_string() };
+        let update = doc!{ "$set": { "status": status as u32 } };
+        self.users_collection().update_one(query, update, None).await?;
         Ok(())
     }
 }
