@@ -12,7 +12,7 @@ use crate::{cfg::CfgPtr, storage::StoragePtr, handlers::add_profile_dialogue::{A
 pub use add_profile_dialogue::AddProfileDialogueState;
 
 pub fn get_handler(cfg: CfgPtr) -> Handler<'static, DependencyMap, Result<()>, DpHandlerDescription> {
-    let admin_id = ChatId(cfg.admin_id as i64);
+    let admin_id = ChatId(cfg.admin_id);
     
     async fn user_branch(bot: Bot, msg: Message, storage: StoragePtr, cfg: CfgPtr) -> Result<()> {
         if !msg.chat.is_private() {
@@ -52,7 +52,15 @@ pub fn get_handler(cfg: CfgPtr) -> Handler<'static, DependencyMap, Result<()>, D
         );
 
     let callback_query_handler = Update::filter_callback_query()
-        .endpoint(user::on_callback_query);
+        .branch(dptree::filter(move |cq: CallbackQuery| {
+            ChatId(cq.from.id.0 as i64) == admin_id &&
+            serde_json::from_str::<admin::AdminCallbackQuery>(&cq.data.unwrap_or(String::new())).is_ok()
+        }).endpoint(admin::on_callback_query))
+        
+        .branch(dptree::filter(move |cq: CallbackQuery| {
+            serde_json::from_str::<user::UserCallbackQuery>(&cq.data.unwrap_or(String::new())).is_ok()
+        })
+        .endpoint(user::on_callback_query));
 
     dptree::entry().branch(msg_handler).branch(callback_query_handler)
 }

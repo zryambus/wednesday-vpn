@@ -4,14 +4,14 @@ services:
   mongo:
     image: mongo
   wgc:
-    image: wgc
+    image: ivolchenkov/wgc
     ports:
       - 51820:51820/udp
     cap_add:
     - NET_ADMIN
     - SYS_MODULE
   wgb:
-    image: wgb
+    image: ivolchenkov/wgb
     depends_on:
       - wgc
       - mongo

@@ -24,7 +24,6 @@ pub enum UserCommands {
     Start,
     ID,
     Invite{ id: String },
-    RequestAccess,
 }
 
 pub fn get_process_error(bot: Bot, chat_id: ChatId) -> Box<dyn Fn(String) -> Box<dyn FnOnce(anyhow::Error) -> anyhow::Error + Send> + Send> {
@@ -52,10 +51,6 @@ pub async fn on_command(bot: Bot, msg: Message, storage: StoragePtr, cfg: CfgPtr
         UserCommands::Start => {
             match user_status {
                 UserStatus::Granted => {
-                    bot.send_message(chat_id, "Access denied").send().await?;
-                    return Ok(())
-                },
-                _ => {
                     let keyboard: Vec<Vec<InlineKeyboardButton>> = vec![
                         vec![
                             InlineKeyboardButton::callback(
@@ -64,10 +59,27 @@ pub async fn on_command(bot: Bot, msg: Message, storage: StoragePtr, cfg: CfgPtr
                             ),
                         ]
                     ];
-                    bot.send_message(msg.chat.id, "Ready to go")
+                    bot.send_message(chat_id, "Ready to go")
                         .reply_markup(InlineKeyboardMarkup::new(keyboard))
                         .send().await?;
                 }
+                UserStatus::None => {
+                    let keyboard: Vec<Vec<InlineKeyboardButton>> = vec![
+                        vec![
+                            InlineKeyboardButton::callback(
+                                "Request acceess".to_string(),
+                                serde_json::to_string(&UserCallbackQuery::RequestAccess{}).unwrap()
+                            ),
+                        ]
+                    ];
+                    bot.send_message(chat_id, "Access denied")
+                        .reply_markup(InlineKeyboardMarkup::new(keyboard))
+                        .send().await?;
+                },
+                _ => {
+                    bot.send_message(chat_id, "Access denied").send().await?;
+                    return Ok(())
+                },
             }
         },
         UserCommands::ID => {
@@ -92,29 +104,6 @@ pub async fn on_command(bot: Bot, msg: Message, storage: StoragePtr, cfg: CfgPtr
                 }
             }
         },
-        UserCommands::RequestAccess => {
-            match user_status {
-                UserStatus::Restricted => {
-                    bot.send_message(chat_id, "Go away").send().await?;
-                    return Ok(());
-
-                },
-                UserStatus::Requested => {
-                    bot.send_message(chat_id, "You are already requested for access").send().await?;
-                    return Ok(());
-                },
-                UserStatus::Granted => {
-                    bot.send_message(chat_id, "You are already has access").send().await?;
-                    return Ok(());
-                },
-                UserStatus::None => {
-                    storage.update_user_status(user_id, UserStatus::Requested).await?;
-                    bot.send_message(chat_id, "Request sent").send().await?;
-                    bot.send_message(ChatId(cfg.admin_id as i64), "New access request were recieved").send().await?;
-                    return Ok(());
-                },
-            }
-        }
     }
     Ok(())
 }
@@ -135,6 +124,7 @@ pub enum UserCallbackQuery {
     AddProfile,
     GetProfileManager{ name: String },
     ManageProfile{ name: String, action: ManageProfileAction },
+    RequestAccess,
 }
 
 pub async fn on_callback_query(cq: CallbackQuery, bot: Bot, storage: StoragePtr, cfg: CfgPtr, add_profile_dialogue_storage: Arc<InMemStorage<AddProfileDialogueState>>) -> Result<()> {
@@ -142,6 +132,7 @@ pub async fn on_callback_query(cq: CallbackQuery, bot: Bot, storage: StoragePtr,
         let callback_query = serde_json::from_str::<UserCallbackQuery>(&data)?;
         let process_error = get_process_error(bot.clone(), cq.from.id.into());
         let user_id = cq.from.id;
+        let chat_id = ChatId::from(user_id);
         let sync_server_config  = || sync_config(&storage, &cfg);
 
         match callback_query {
@@ -306,6 +297,30 @@ pub async fn on_callback_query(cq: CallbackQuery, bot: Bot, storage: StoragePtr,
                     },
                 }
             },
+            UserCallbackQuery::RequestAccess => {
+                let user_status = storage.get_user_status(user_id).await?;
+                match user_status {
+                    UserStatus::Restricted => {
+                        bot.send_message(chat_id, "Go away").send().await?;
+                        return Ok(());
+    
+                    },
+                    UserStatus::Requested => {
+                        bot.send_message(chat_id, "You are already requested for access").send().await?;
+                        return Ok(());
+                    },
+                    UserStatus::Granted => {
+                        bot.send_message(chat_id, "You are already has access").send().await?;
+                        return Ok(());
+                    },
+                    UserStatus::None => {
+                        storage.update_user_status(user_id, UserStatus::Requested).await?;
+                        bot.send_message(chat_id, "Request sent").send().await?;
+                        bot.send_message(ChatId(cfg.admin_id), "New access request were recieved").send().await?;
+                        return Ok(());
+                    },
+                }
+            }
         }
     }
     Ok(())

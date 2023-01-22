@@ -14,7 +14,7 @@ pub struct Cfg {
 
     pub bot_name: String,
     pub bot_token: String,
-    pub admin_id: u64,
+    pub admin_id: i64,
 
     pub post_up: String,
     pub pre_down: String,

@@ -3,8 +3,9 @@ use std::{sync::Arc};
 use mongodb::{Client, Database, bson::doc, Collection, options::ClientOptions};
 use anyhow::{Result, anyhow, Ok};
 use serde::{Serialize, Deserialize};
+use serde_repr::{Serialize_repr, Deserialize_repr};
 use teloxide::prelude::*;
-use futures::stream::TryStreamExt;
+use futures::{stream::TryStreamExt, StreamExt};
 use ipnet::IpAdd;
 
 use crate::{cfg::CfgPtr, wireguard::{config::{build_peer_config, PeerConfig}, keys::gen_keys}};
@@ -35,8 +36,8 @@ impl Invite {
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Debug)]
-#[repr(u8)]
+#[derive(Serialize_repr, Deserialize_repr, Default, Debug)]
+#[repr(u32)]
 pub enum UserStatus {
     #[default]
     None,
@@ -173,11 +174,6 @@ impl Storage {
             return Err(anyhow!("Invalid invite code"));
         }
 
-        let user = User{
-            user_id: user_id.to_string(),
-            status: UserStatus::Granted,
-        };
-
         let _user = self.get_user(user_id).await?;
         
         let query = doc!{ "user_id": user_id.to_string() };
@@ -204,9 +200,16 @@ impl Storage {
     }
 
     pub async fn update_user_status(&self, user_id: UserId, status: UserStatus) -> Result<()> {
+        tracing::debug!("Updating user status for user {}, status {:?}", user_id, status);
         let query = doc!{ "user_id": user_id.to_string() };
         let update = doc!{ "$set": { "status": status as u32 } };
         self.users_collection().update_one(query, update, None).await?;
         Ok(())
+    }
+
+    pub async fn get_users_with_requested_access(&self) -> Result<Vec<User>> {
+        let filter = doc! { "status": UserStatus::Requested as u32 };
+        let users = self.users_collection().find(filter, None).await?.try_collect().await?;
+        Ok(users)
     }
 }
