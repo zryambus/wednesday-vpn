@@ -28,7 +28,7 @@ impl std::str::FromStr for ClientEntry {
     }
 }
 
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::PathBuf, str::FromStr};
 
 impl fmt::Display for ClientEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
@@ -51,7 +51,10 @@ mod cfg;
 mod storage;
 
 use execute::Execute;
-use rpc::wireguard::{SyncConfigRequest, SyncConfigResponse, Server, Client, wireguard_control_server, StartWireguardRequest, StartWireguardResponse};
+use rpc::wireguard::{
+    SyncConfigRequest, SyncConfigResponse, Server, Client, wireguard_control_server, 
+    StartWireguardRequest, StartWireguardResponse, GetStatisticsRequest, GetStatisticsResponse, StatisticsEntry,
+};
 use tonic::{Request, Response, async_trait, Status};
 
 const CONFIG_PATH: &'static str = "/etc/wireguard/wg0.conf";
@@ -91,6 +94,16 @@ impl WireguardControlServer {
         }
         Ok(())
     }
+
+    fn get_statistics(&self) -> Result<Vec<StatisticsEntry>, Status> {
+        let mut cmd = execute::shell("wg show wg0 all dump");
+        let output = cmd.output().map_err(|e| Status::internal(format!("Could not get statistics info: {}", e)))?;
+        let data = String::from_utf8(output.stdout).map_err(|e| Status::internal(format!("Could not get string from output: {}", e)))?;
+        for line in data.lines().skip(1) {
+            let entry = ClientEntry::from_str(&line); 
+        }
+        Ok(vec![])
+    }
 }
 
 #[async_trait]
@@ -107,6 +120,11 @@ impl rpc::wireguard::wireguard_control_server::WireguardControl for WireguardCon
         let server = server.ok_or(Status::invalid_argument("Field `server` is empty"))?;
         let _ = self.start_wireguard(&server)?;        
         Ok(Response::new(StartWireguardResponse{}))
+    }
+
+    async fn get_statistics(&self, _request: Request<GetStatisticsRequest>) -> Result<Response<GetStatisticsResponse>, Status> {
+        // let 
+        Ok(Response::new(GetStatisticsResponse{ entries: vec![] }))
     }
 }
 

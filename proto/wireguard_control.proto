@@ -33,7 +33,23 @@ message StartWireguardRequest {
 message StartWireguardResponse {
 }
 
+message GetStatisticsRequest {
+}
+
+message StatisticsEntry {
+    string public_key = 1;
+    uint32 ip = 2;
+    uint64 latest_handshake = 3;
+    uint64 tx = 4;
+    uint64 rx = 5;
+}
+
+message GetStatisticsResponse {
+    repeated StatisticsEntry entries = 1;   
+}
+
 service WireguardControl {
     rpc SyncConfig(SyncConfigRequest) returns (SyncConfigResponse) {}
     rpc StartWireguard(StartWireguardRequest) returns (StartWireguardResponse) {}
+    rpc GetStatistics(GetStatisticsRequest) returns (GetStatisticsResponse) {}
 }
