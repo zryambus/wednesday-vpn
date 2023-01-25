@@ -86,8 +86,8 @@ impl fmt::Display for ClientEntry {
         };
         write!(
             f,
-            "Pubkey: {}, IP: {}, Handshake: {}, tx: {}, rx: {}",
-            self.pubkey, self.ip, handshake, tx, rx
+            "IP: {}, handshake: {}, tx: {}, rx: {}",
+            self.ip, handshake, tx, rx
         )
     }
 }

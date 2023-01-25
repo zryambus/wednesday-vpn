@@ -102,8 +102,18 @@ pub async fn on_command(
         },
         AdminCommands::Statistics => {
             let entries = get_statistics().await?;
-            let entries: Vec<String> = entries.into_iter().map(|e| format!("{}", e)).collect();
-            let text = format!("Statistics:\n{}", entries.join("\n"));
+            let mut text = String::from("Statistics:\n");
+            for entry in entries {
+                let profile = storage.get_profile(&entry.pubkey).await?;
+                let chat = bot.get_chat(ChatId(profile.user_id.parse()?)).await?;
+                let name = format!(
+                    "{} @{} {}",
+                    chat.first_name().unwrap_or("(No first name)"),
+                    chat.username().unwrap_or("(No username)"),
+                    chat.last_name().unwrap_or("(No last name)")
+                );
+                text.push_str(&format!("{} {}\n", name, entry));
+            }
             bot.send_message(chat_id, text).send().await?;
         }
     }

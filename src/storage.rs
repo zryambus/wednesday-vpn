@@ -252,4 +252,10 @@ impl Storage {
             .await?;
         Ok(users)
     }
+
+    pub async fn get_profile(&self, public_key: &str) -> Result<WGProfile> {
+        let filter = doc!{ "public_key": public_key };
+        let profile = self.profiles_collection().find_one(filter, None).await?.ok_or(anyhow!("Could not find profile in database"))?;
+        Ok(profile)
+    }
 }
