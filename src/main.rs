@@ -1,13 +1,14 @@
-mod wireguard;
-mod storage;
 mod cfg;
+mod control_client;
 mod handlers;
 mod rpc;
-mod control_client;
+mod statistics;
+mod storage;
+mod wireguard;
 
 use anyhow::Result;
 use std::sync::Arc;
-use teloxide::{prelude::*, dispatching::dialogue::InMemStorage};
+use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{prelude::*, registry::Registry};
 
@@ -16,10 +17,7 @@ fn main() -> Result<()> {
         .with_target(false)
         .with_filter(LevelFilter::DEBUG);
 
-    Registry::default()
-        .with(fmt_layer)
-        .try_init()
-        .unwrap();
+    Registry::default().with(fmt_layer).try_init().unwrap();
 
     let rt = tokio::runtime::Runtime::new()?;
     let result: Result<()> = rt.block_on(async move {
@@ -32,8 +30,8 @@ fn main() -> Result<()> {
 
         Dispatcher::builder(bot, handlers::get_handler(service_config.clone()))
             .dependencies(dptree::deps![
-                service_config.clone(), 
-                storage.clone(), 
+                service_config.clone(),
+                storage.clone(),
                 InMemStorage::<handlers::AddProfileDialogueState>::new()
             ])
             .enable_ctrlc_handler()
@@ -42,7 +40,7 @@ fn main() -> Result<()> {
             .await;
         Ok(())
     });
-    
+
     if let Err(e) = result {
         eprintln!("Program finished with error: {}", e);
         e.chain()

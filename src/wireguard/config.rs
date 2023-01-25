@@ -1,7 +1,11 @@
+use crate::{
+    cfg::CfgPtr,
+    rpc::wireguard::{Client, Server},
+    storage::WGProfile,
+};
 use serde::Serialize;
 use tinytemplate::TinyTemplate;
-use crate::{rpc::wireguard::{Server, Client}, cfg::CfgPtr, storage::WGProfile};
-use tonic::{Status, Code};
+use tonic::{Code, Status};
 
 #[derive(Serialize)]
 struct ServerTemplateCtx {
@@ -39,7 +43,7 @@ struct PeerConfigCtx {
     endpoint: String,
     port: u16,
     only_local: bool,
-    dns: String
+    dns: String,
 }
 
 const PEER_CONFIG_TEMPLATE: &str = "[Interface]
@@ -61,7 +65,7 @@ pub fn build_server_config(server: &Server, clients: &Vec<Client>) -> Result<Str
     tt.add_template("peer_template", PEER_TEMPLATE)
         .map_err(|e| Status::new(Code::Internal, format!("{}", e)))?;
 
-    let ctx = ServerTemplateCtx{
+    let ctx = ServerTemplateCtx {
         server_private_key: server.key.clone(),
         port: server.port as u16,
         server_ip: std::net::Ipv4Addr::from(server.ip).to_string(),
@@ -69,18 +73,22 @@ pub fn build_server_config(server: &Server, clients: &Vec<Client>) -> Result<Str
         post_up: server.post_up.clone(),
         pre_down: server.pre_down.clone(),
     };
-    config.push_str(&tt.render("server_template", &ctx)
-        .map_err(|e| Status::new(Code::Internal, format!("{}", e)))?);
+    config.push_str(
+        &tt.render("server_template", &ctx)
+            .map_err(|e| Status::new(Code::Internal, format!("{}", e)))?,
+    );
     config.push_str("\n\n");
 
     for client in clients {
-        let ctx = PeerCtx{
+        let ctx = PeerCtx {
             client_ip: std::net::Ipv4Addr::from(client.ip).to_string(),
-            client_public_key: client.key.clone()
+            client_public_key: client.key.clone(),
         };
 
-        config.push_str(&tt.render("peer_template", &ctx)
-            .map_err(|e| Status::new(Code::Internal, format!("{}", e)))?);
+        config.push_str(
+            &tt.render("peer_template", &ctx)
+                .map_err(|e| Status::new(Code::Internal, format!("{}", e)))?,
+        );
         config.push_str("\n\n");
     }
 
@@ -118,14 +126,20 @@ impl PeerConfig {
 pub fn build_peer_config(peer_cfg: &PeerConfig) -> Result<String, tinytemplate::error::Error> {
     let mut tt = tinytemplate::TinyTemplate::new();
     tt.add_template("peer_config_template", PEER_CONFIG_TEMPLATE)?;
-    let ctx = PeerConfigCtx{
+    let ctx = PeerConfigCtx {
         peer_ip: std::net::Ipv4Addr::from(peer_cfg.ip).to_string(),
         peer_private_key: peer_cfg.key.clone(),
         server_public_key: peer_cfg.public_key.clone(),
         endpoint: peer_cfg.endpoint.clone(),
         only_local: false,
         port: peer_cfg.port,
-        dns: peer_cfg.dns.clone().into_iter().map(|ip| std::net::Ipv4Addr::from(ip).to_string()).collect::<Vec<String>>().join(", "),
+        dns: peer_cfg
+            .dns
+            .clone()
+            .into_iter()
+            .map(|ip| std::net::Ipv4Addr::from(ip).to_string())
+            .collect::<Vec<String>>()
+            .join(", "),
     };
     let config = tt.render("peer_config_template", &ctx)?;
     Ok(config)
@@ -136,7 +150,7 @@ pub fn build_peer_config(peer_cfg: &PeerConfig) -> Result<String, tinytemplate::
 
 #[test]
 fn test_build_server_config() {
-    let server = Server{
+    let server = Server {
         key: "YE3x5BL8N36oPZ9N2HbQIrPPGI+b+Qk86TjrU+FJonU=".into(),
         ip: std::net::Ipv4Addr::new(10, 9, 0, 1).into(),
         port: 51820,
@@ -146,25 +160,26 @@ fn test_build_server_config() {
         pre_down: "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE".into(),
     };
 
-    let clients: Vec<Client> = vec![
-        Client{
-            ip: std::net::Ipv4Addr::new(10, 9, 0, 2).into(),
-            key: "qMzUy9H0ISe8AMNIs2Pm+RmVYdUxn9b3XfEAOILTfVA=".into()            
-        }
-    ];
+    let clients: Vec<Client> = vec![Client {
+        ip: std::net::Ipv4Addr::new(10, 9, 0, 2).into(),
+        key: "qMzUy9H0ISe8AMNIs2Pm+RmVYdUxn9b3XfEAOILTfVA=".into(),
+    }];
 
     let res = build_server_config(&server, &clients).expect("Could not build server config");
-    println!("{}", res);    
+    println!("{}", res);
 }
 
 #[test]
 fn test_build_peer_config() {
-    let cfg = PeerConfig{
+    let cfg = PeerConfig {
         ip: std::net::Ipv4Addr::new(10, 9, 0, 2).into(),
         key: "GGEjcrm6GXFlunqnT0HY23jWqaQ402C371jfblVaw3w=".into(),
         endpoint: "127.0.0.1".into(),
         port: 51820,
-        dns: vec![std::net::Ipv4Addr::new(8, 8, 8, 8).into(), std::net::Ipv4Addr::new(1, 1, 1, 1).into()],
+        dns: vec![
+            std::net::Ipv4Addr::new(8, 8, 8, 8).into(),
+            std::net::Ipv4Addr::new(1, 1, 1, 1).into(),
+        ],
         public_key: "vvM86VntTg9J4XhtDd3tRN0XS6zUS+6OgiwTmx+FeEk=".into(),
     };
 

@@ -1,7 +1,11 @@
 use crate::{
-    rpc::wireguard::{wireguard_control_client::WireguardControlClient, SyncConfigRequest, Client, Server, StartWireguardRequest},
+    rpc::wireguard::{
+        wireguard_control_client::WireguardControlClient, SyncConfigRequest, Client, Server, StartWireguardRequest,
+        GetStatisticsRequest, GetStatisticsResponse,
+    },
     storage::StoragePtr,
-    cfg::CfgPtr
+    cfg::CfgPtr,
+    statistics::ClientEntry,
 };
 
 use anyhow::Result;
@@ -43,4 +47,13 @@ pub async fn start_wireguard_server(cfg: &CfgPtr) -> Result<()> {
     };
     let _ = client.start_wireguard(request).await?;
     Ok(())
+}
+
+pub async fn get_statistics() -> Result<Vec<ClientEntry>> {
+    let mut client = WireguardControlClient::connect("http://wgc:8080").await?;
+    let request = GetStatisticsRequest{};
+    let response = client.get_statistics(request).await?; 
+    let GetStatisticsResponse{ entries } = response.into_inner();
+    let entries: Vec<ClientEntry> = entries.into_iter().map(|e| e.into()).collect();
+    Ok(entries)
 }

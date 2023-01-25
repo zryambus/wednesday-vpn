@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use config::{Config, File, Environment};
-use serde::Deserialize;
 use anyhow::Result;
+use config::{Config, Environment, File};
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Cfg {
