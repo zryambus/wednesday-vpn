@@ -1,7 +1,7 @@
 use crate::{
     cfg::CfgPtr,
     rpc::wireguard::{Client, Server},
-    storage::WGProfile,
+    storage::Profile,
 };
 use serde::Serialize;
 use tinytemplate::TinyTemplate;
@@ -105,15 +105,21 @@ pub struct PeerConfig {
 }
 
 impl PeerConfig {
-    pub fn new(profile: &WGProfile, cfg: &CfgPtr) -> anyhow::Result<Self> {
+    pub fn new(profile: &Profile, cfg: &CfgPtr) -> anyhow::Result<Self> {
         let endpoint_is_ip = cfg.endpoint.parse::<std::net::Ipv4Addr>().is_ok();
         let endpoint_is_domain = url::Url::parse(&cfg.endpoint).is_ok();
         if !endpoint_is_ip && !endpoint_is_domain {
             return Err(anyhow::anyhow!("Invalid endpoint"));
         }
 
+        let ip = if let std::net::IpAddr::V4(id) = profile.ip {
+            id.into()
+        } else {
+            return Err(anyhow::anyhow!("Invalid ip address"));
+        };
+
         Ok(Self {
-            ip: profile.ip.into(),
+            ip,
             key: profile.private_key.clone(),
             endpoint: cfg.endpoint.clone(),
             port: cfg.port,

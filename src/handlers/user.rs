@@ -112,7 +112,11 @@ pub async fn on_command(
                 return Ok(());
             }
             _ => {
-                let invite = Invite { id };
+                let invite = Invite {
+                    id: uuid::Uuid::try_parse(&id)
+                        .map_err(|e| anyhow!(e))
+                        .map_err(process_error("Invalid id".into()))?
+                };
                 storage
                     .activate_user(user_id, invite)
                     .await

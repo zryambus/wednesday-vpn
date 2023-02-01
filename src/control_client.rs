@@ -22,10 +22,13 @@ pub async fn sync_config(storage: &StoragePtr, cfg: &CfgPtr) -> Result<()> {
             post_up: cfg.post_up.clone(),
             pre_down: cfg.pre_down.clone(),
         }),
-        clients: storage.get_clients().await?.into_iter().map(|c| Client{
-            ip: c.ip.into(),
-            key: c.public_key
-        }).collect()
+        clients: storage.get_profiles().await?.into_iter()
+            .map(|c| Some(Client{
+                ip: if let std::net::IpAddr::V4(ip) = c.ip { ip.into() } else { return None },
+                key: c.public_key
+            }))
+            .flatten()
+            .collect()
     };
     let _response = client.sync_config(request).await?;
     Ok(())

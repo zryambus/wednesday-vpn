@@ -3,10 +3,14 @@ use std::sync::Arc;
 use anyhow::{anyhow, Ok, Result};
 use futures::{stream::TryStreamExt, StreamExt};
 use ipnet::IpAdd;
-use mongodb::{bson::doc, options::ClientOptions, Client, Collection, Database};
+// use mongodb::{bson::doc, options::ClientOptions, Client, Collection, Database};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use teloxide::prelude::*;
+// use bb8::{Builder, Pool};
+// use bb8_postgres::{PostgresConnectionManager, tokio_postgres::{config::Config, NoTls, GenericClient}};
+use std::str::FromStr;
+use sqlx::{Pool, postgres::Postgres, query, FromRow};
 
 use crate::{
     cfg::CfgPtr,
@@ -17,33 +21,33 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct WGProfile {
+pub struct Profile {
     pub name: String,
     pub user_id: String,
 
-    pub ip: std::net::Ipv4Addr,
+    pub ip: std::net::IpAddr,
 
     pub private_key: String,
     pub public_key: String,
 
-    pub enabled: bool,
     pub only_local: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub struct Invite {
-    pub id: String,
+    pub id: uuid::Uuid,
 }
 
 impl Invite {
     pub fn new() -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
+        let id = uuid::Uuid::new_v4();
         Self { id }
     }
 }
 
-#[derive(Serialize_repr, Deserialize_repr, Default, Debug)]
-#[repr(u32)]
+#[derive(Default, Debug, sqlx::Type)]
+#[sqlx(type_name = "user_status")]
+#[sqlx(rename_all = "lowercase")]
 pub enum UserStatus {
     #[default]
     None,
@@ -52,7 +56,7 @@ pub enum UserStatus {
     Restricted,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub struct User {
     pub user_id: String,
     pub status: UserStatus,
@@ -60,57 +64,42 @@ pub struct User {
 
 #[derive(Clone)]
 pub struct Storage {
-    client: Client,
-    database: Database,
+    pool: Pool<Postgres>,
 }
 
 pub type StoragePtr = Arc<Storage>;
 
 impl Storage {
     pub async fn new() -> Result<Self> {
-        let options = ClientOptions::parse("mongodb://mongo:27017").await?;
-        let client = Client::with_options(options)?;
-        let database = client.database("wednesday");
-        Ok(Self { client, database })
+        let pool = Pool::<Postgres>::connect("postgres://wednesday:password@postgres:5432").await?;
+        sqlx::migrate!().run(&pool).await?;
+        Ok(Self{ pool })
     }
 
-    fn profiles_collection(&self) -> Collection<WGProfile> {
-        self.database.collection::<WGProfile>("clients")
-    }
-
-    fn invites_collection(&self) -> Collection<Invite> {
-        self.database.collection("invites")
-    }
-
-    fn users_collection(&self) -> Collection<User> {
-        self.database.collection("users")
-    }
-
-    pub async fn get_clients(&self) -> Result<Vec<WGProfile>> {
-        let filter = doc! {};
-        let clients: Vec<WGProfile> = self
-            .profiles_collection()
-            .find(filter, None)
-            .await?
-            .try_collect()
-            .await?;
+    pub async fn get_profiles(&self) -> Result<Vec<Profile>> {
+        let clients = sqlx::query!("
+            SELECT * FROM `profiles`
+        ").fetch_all(&self.pool).await?;
         Ok(clients)
     }
 
     pub async fn add_profile(&self, name: &String, user_id: UserId) -> Result<()> {
-        let filter = doc! { "name": name.clone(), "user_id": user_id.to_string() };
-        let existed = self
-            .profiles_collection()
-            .find_one(Some(filter), None)
-            .await?;
-        if let Some(_) = existed {
+        let exists = sqlx::query!(
+            "SELECT * FROM `profiles` WHERE `name` = $1 AND `user_id` = $2",
+            name, user_id
+        )
+            .fetch_optional(&self.pool).await?
+            .is_some();
+
+        if exists {
             return Err(anyhow!("Profile with name '{}' already existing", name));
         }
-        let max = self.get_clients().await?.into_iter().map(|c| c.ip).max();
+
+        let max = self.get_profiles().await?.into_iter().map(|c| c.ip).max();
 
         let gateway = std::net::Ipv4Addr::new(10, 9, 0, 1);
 
-        let max = if let Some(value) = max {
+        let max = if let Some(std::net::IpAddr::V4(value)) = max {
             value
         } else {
             gateway
@@ -120,9 +109,8 @@ impl Storage {
 
         let (private, public) = gen_keys()?;
 
-        let profile = WGProfile {
-            enabled: false,
-            ip: ip,
+        let profile = Profile {
+            ip: ip.into(),
             only_local: false,
             name: name.clone(),
             private_key: private.to_owned(),
@@ -135,9 +123,9 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn get_user_profiles(&self, user_id: UserId) -> Result<Vec<WGProfile>> {
+    pub async fn get_user_profiles(&self, user_id: UserId) -> Result<Vec<Profile>> {
         let filter = doc! { "user_id": user_id.to_string() };
-        let profiles: Vec<WGProfile> = self
+        let profiles: Vec<Profile> = self
             .profiles_collection()
             .find(filter, None)
             .await?
@@ -146,7 +134,7 @@ impl Storage {
         Ok(profiles)
     }
 
-    pub async fn get_user_profile(&self, user_id: UserId, name: &String) -> Result<WGProfile> {
+    pub async fn get_user_profile(&self, user_id: UserId, name: &String) -> Result<Profile> {
         let filter = doc! { "user_id": user_id.to_string(), "name": name };
         let profile = self.profiles_collection().find_one(filter, None).await?;
         if let Some(profile) = profile {
@@ -160,7 +148,7 @@ impl Storage {
         &self,
         user_id: UserId,
         name: &String,
-        profile: WGProfile,
+        profile: Profile,
     ) -> Result<()> {
         let filter = doc! { "user_id": user_id.to_string(), "name": name };
         self.profiles_collection()
@@ -253,7 +241,7 @@ impl Storage {
         Ok(users)
     }
 
-    pub async fn get_profile(&self, public_key: &str) -> Result<WGProfile> {
+    pub async fn get_profile(&self, public_key: &str) -> Result<Profile> {
         let filter = doc!{ "public_key": public_key };
         let profile = self.profiles_collection().find_one(filter, None).await?.ok_or(anyhow!("Could not find profile in database"))?;
         Ok(profile)
