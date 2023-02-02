@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{anyhow, Result};
 use futures::{stream::TryStreamExt, StreamExt};
 use ipnet::IpAdd;
 // use mongodb::{bson::doc, options::ClientOptions, Client, Collection, Database};
@@ -10,7 +10,7 @@ use teloxide::prelude::*;
 // use bb8::{Builder, Pool};
 // use bb8_postgres::{PostgresConnectionManager, tokio_postgres::{config::Config, NoTls, GenericClient}};
 use std::str::FromStr;
-use sqlx::{Pool, postgres::Postgres, query, FromRow};
+use sqlx::{Pool, postgres::Postgres, query, FromRow, types::ipnetwork::*, Row};
 
 use crate::{
     cfg::CfgPtr,
@@ -23,7 +23,7 @@ use crate::{
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Profile {
     pub name: String,
-    pub user_id: String,
+    pub user_id: UserId,
 
     pub ip: std::net::IpAddr,
 
@@ -31,6 +31,19 @@ pub struct Profile {
     pub public_key: String,
 
     pub only_local: bool,
+}
+
+impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for Profile {
+    fn from_row(row: &'_ sqlx::postgres::PgRow) -> std::result::Result<Self, sqlx::Error> {
+        Ok(Self{
+            name: row.get("name"),
+            user_id: UserId(row.get::<i64, _>("user_id") as u64),
+            ip: row.get::<IpNetwork, _>("ip").ip(),
+            private_key: row.get("private_key"),
+            public_key: row.get("public_key"),
+            only_local: row.get("only_local"),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -77,16 +90,24 @@ impl Storage {
     }
 
     pub async fn get_profiles(&self) -> Result<Vec<Profile>> {
-        let clients = sqlx::query!("
-            SELECT * FROM `profiles`
-        ").fetch_all(&self.pool).await?;
-        Ok(clients)
+        let profiles = sqlx::query_as!(Profile, r#"
+            SELECT * FROM profiles
+        "#).fetch_all(&self.pool).await?;
+        // let profiles = rows.into_iter().map(|row| Some(Profile{
+        //     name: row.name,
+        //     user_id: UserId(row.user_id as u64),
+        //     ip: row.ip.ip(),
+        //     private_key: row.private_key,
+        //     public_key: row.public_key,
+        //     only_local: row.only_local,
+        // })).flatten().collect();
+        Ok(profiles)
     }
 
     pub async fn add_profile(&self, name: &String, user_id: UserId) -> Result<()> {
         let exists = sqlx::query!(
-            "SELECT * FROM `profiles` WHERE `name` = $1 AND `user_id` = $2",
-            name, user_id
+            r#"SELECT * FROM profiles WHERE name = $1 AND user_id = $2"#,
+            name, user_id.0 as i64
         )
             .fetch_optional(&self.pool).await?
             .is_some();
@@ -115,11 +136,12 @@ impl Storage {
             name: name.clone(),
             private_key: private.to_owned(),
             public_key: public.to_owned(),
-            user_id: user_id.to_string(),
+            user_id,
         };
-        self.profiles_collection()
-            .insert_one(&profile, None)
-            .await?;
+        sqlx::query!(
+            r#"INSERT INTO profiles (name, user_id, ip, private_key, public_key, only_local) VALUES ($1, $2, $3, $4, $5, $6)"#,
+            profile.name, profile.user_id.0 as i64, IpNetwork::from(profile.ip), profile.private_key, profile.public_key, profile.only_local
+        ).execute(&self.pool).await?;
         Ok(())
     }
 
