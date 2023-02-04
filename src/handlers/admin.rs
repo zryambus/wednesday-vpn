@@ -9,7 +9,7 @@ use teloxide::{
 
 use crate::{
     handlers::user::get_process_error,
-    storage::{StoragePtr, User, UserStatus},
+    storage::{StoragePtr, UserStatus},
     control_client::get_statistics,
 };
 
@@ -31,7 +31,6 @@ pub async fn on_command(
     cmd: AdminCommands,
 ) -> Result<()> {
     let chat_id = msg.chat.id;
-    // let user_id = UserId(chat_id.0 as u64);
     let process_error = get_process_error(bot.clone(), chat_id);
     match cmd {
         AdminCommands::Admin => {
@@ -66,7 +65,7 @@ pub async fn on_command(
 
             let mut infos: Vec<(String, UserId)> = vec![];
             for user in users {
-                let chat = bot.get_chat(ChatId(user.user_id.parse()?)).await?;
+                let chat = bot.get_chat(ChatId(user.user_id.0 as i64)).await?;
                 let user_id = UserId(chat.id.0 as u64);
                 let name = format!(
                     "{} @{} {}",
@@ -105,7 +104,7 @@ pub async fn on_command(
             let mut text = String::from("Statistics:\n");
             for entry in entries {
                 let profile = storage.get_profile(&entry.pubkey).await?;
-                let chat = bot.get_chat(ChatId(profile.user_id.parse()?)).await?;
+                let chat = bot.get_chat(ChatId(profile.user_id.0 as i64)).await?;
                 let name = format!(
                     "{} @{} {}",
                     chat.first_name().unwrap_or("(No first name)"),

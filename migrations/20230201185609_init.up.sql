@@ -17,5 +17,5 @@ CREATE TYPE user_status AS ENUM ('none', 'requested', 'granted', 'restricted');
 
 CREATE TABLE IF NOT EXISTS users (
     user_id BIGINT NOT NULL,
-    user_status user_status DEFAULT 'none'
+    status user_status DEFAULT 'none'
 );

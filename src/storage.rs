@@ -1,16 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use futures::{stream::TryStreamExt, StreamExt};
 use ipnet::IpAdd;
-// use mongodb::{bson::doc, options::ClientOptions, Client, Collection, Database};
 use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use teloxide::prelude::*;
-// use bb8::{Builder, Pool};
-// use bb8_postgres::{PostgresConnectionManager, tokio_postgres::{config::Config, NoTls, GenericClient}};
-use std::str::FromStr;
-use sqlx::{Pool, postgres::Postgres, query, FromRow, types::ipnetwork::*, Row};
+use sqlx::{Pool, postgres::Postgres, FromRow, types::ipnetwork::*, Row};
 
 use crate::{
     cfg::CfgPtr,
@@ -71,8 +65,17 @@ pub enum UserStatus {
 
 #[derive(Debug)]
 pub struct User {
-    pub user_id: String,
+    pub user_id: UserId,
     pub status: UserStatus,
+}
+
+impl FromRow<'_, sqlx::postgres::PgRow> for User {
+    fn from_row(row: &'_ sqlx::postgres::PgRow) -> std::result::Result<Self, sqlx::Error> {
+        Ok(Self{
+            user_id: UserId(row.get::<i64, _>("user_id") as u64),
+            status: row.get::<UserStatus, _>("status"),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -84,23 +87,18 @@ pub type StoragePtr = Arc<Storage>;
 
 impl Storage {
     pub async fn new() -> Result<Self> {
-        let pool = Pool::<Postgres>::connect("postgres://wednesday:password@postgres:5432").await?;
+        let pool = Pool::<Postgres>::connect("postgres://wednesday:password@postgres:5432/wednesday_vpn").await?;
         sqlx::migrate!().run(&pool).await?;
         Ok(Self{ pool })
     }
 
     pub async fn get_profiles(&self) -> Result<Vec<Profile>> {
-        let profiles = sqlx::query_as!(Profile, r#"
+        let profiles = sqlx::query(r#"
             SELECT * FROM profiles
-        "#).fetch_all(&self.pool).await?;
-        // let profiles = rows.into_iter().map(|row| Some(Profile{
-        //     name: row.name,
-        //     user_id: UserId(row.user_id as u64),
-        //     ip: row.ip.ip(),
-        //     private_key: row.private_key,
-        //     public_key: row.public_key,
-        //     only_local: row.only_local,
-        // })).flatten().collect();
+        "#)
+            .fetch_all(&self.pool).await?
+            .into_iter().map(|row| FromRow::from_row(&row))
+            .flatten().collect();
         Ok(profiles)
     }
 
@@ -146,78 +144,64 @@ impl Storage {
     }
 
     pub async fn get_user_profiles(&self, user_id: UserId) -> Result<Vec<Profile>> {
-        let filter = doc! { "user_id": user_id.to_string() };
-        let profiles: Vec<Profile> = self
-            .profiles_collection()
-            .find(filter, None)
-            .await?
-            .try_collect()
-            .await?;
+        let profiles = sqlx::query(r#"SELECT * FROM profiles WHERE user_id = $1"#)
+            .bind(user_id.0 as i64)
+            .fetch_all(&self.pool).await?
+            .into_iter().map(|row| FromRow::from_row(&row))
+            .flatten().collect();
         Ok(profiles)
     }
 
     pub async fn get_user_profile(&self, user_id: UserId, name: &String) -> Result<Profile> {
-        let filter = doc! { "user_id": user_id.to_string(), "name": name };
-        let profile = self.profiles_collection().find_one(filter, None).await?;
-        if let Some(profile) = profile {
-            Ok(profile)
+        let row = sqlx::query(r#"SELECT * FROM profiles WHERE user_id = $1 AND name = $2 LIMIT 1"#)
+            .bind(user_id.0 as i64)
+            .bind(name)
+            .fetch_optional(&self.pool).await?;
+
+        if let Some(row) = row {
+            Ok(Profile::from_row(&row)?)
         } else {
             Err(anyhow!("Could not find user profile"))
         }
     }
 
-    pub async fn update_user_profile(
-        &self,
-        user_id: UserId,
-        name: &String,
-        profile: Profile,
-    ) -> Result<()> {
-        let filter = doc! { "user_id": user_id.to_string(), "name": name };
-        self.profiles_collection()
-            .find_one_and_replace(filter, profile, None)
-            .await?;
-        Ok(())
-    }
-
     pub async fn delete_user_profile(&self, user_id: UserId, name: &String) -> Result<()> {
-        let filter = doc! { "user_id": user_id.to_string(), "name": name };
-        self.profiles_collection()
-            .find_one_and_delete(filter, None)
-            .await?;
+        sqlx::query!("DELETE FROM profiles WHERE user_id = $1 AND name = $2", user_id.0 as i64, name)
+            .execute(&self.pool).await?;
         Ok(())
     }
 
     pub async fn get_user(&self, user_id: UserId) -> Result<User> {
-        let filter = doc! { "user_id": user_id.to_string() };
-        let user = self.users_collection().find_one(filter, None).await?;
-        if user.is_none() {
+        let row = sqlx::query(r#"SELECT * FROM users WHERE user_id = $1"#)
+            .bind(user_id.0 as i64)
+            .fetch_optional(&self.pool).await?;
+        if row.is_none() {
             let new_user = User {
-                user_id: user_id.to_string(),
+                user_id,
                 status: UserStatus::None,
             };
-            self.users_collection().insert_one(&new_user, None).await?;
+            sqlx::query(r#"INSERT INTO users (user_id, status) VALUES ($1, $2)"#)
+                .bind(new_user.user_id.0 as i64)
+                .bind(&new_user.status)
+                .execute(&self.pool).await?;
             return Ok(new_user);
         }
-        Ok(user.unwrap())
+        Ok(User::from_row(&row.unwrap())?)
     }
 
     pub async fn activate_user(&self, user_id: UserId, invite: Invite) -> Result<()> {
-        let filter = doc! { "id": invite.id };
-        let res = self
-            .invites_collection()
-            .find_one_and_delete(filter, None)
-            .await?;
-        if res.is_none() {
+        let res = sqlx::query!(r#"DELETE FROM invites WHERE id = $1"#, invite.id)
+            .execute(&self.pool).await?;
+        if res.rows_affected() == 0 {
             return Err(anyhow!("Invalid invite code"));
         }
 
         let _user = self.get_user(user_id).await?;
 
-        let query = doc! { "user_id": user_id.to_string() };
-        let update = doc! { "$set": { "status": UserStatus::Granted as u32 } };
-        self.users_collection()
-            .update_one(query, update, None)
-            .await?;
+        sqlx::query(r#"UPDATE users SET status = $1 WHERE user_id = $2"#)
+            .bind(UserStatus::Granted)
+            .bind(user_id.0 as i64)
+            .execute(&self.pool).await?;
 
         Ok(())
     }
@@ -229,12 +213,14 @@ impl Storage {
 
     pub async fn create_invite_code(&self) -> Result<Invite> {
         let invite = Invite::new();
-        self.invites_collection().insert_one(&invite, None).await?;
+        sqlx::query!(r#"INSERT INTO invites (id) VALUES ($1)"#, invite.id)
+            .execute(&self.pool).await?;
         Ok(invite)
     }
 
     pub async fn revoke_all_invite_codes(&self) -> Result<()> {
-        self.invites_collection().delete_many(doc! {}, None).await?;
+        sqlx::query!(r#"DELETE FROM invites"#)
+            .execute(&self.pool).await?;
         Ok(())
     }
 
@@ -244,28 +230,26 @@ impl Storage {
             user_id,
             status
         );
-        let query = doc! { "user_id": user_id.to_string() };
-        let update = doc! { "$set": { "status": status as u32 } };
-        self.users_collection()
-            .update_one(query, update, None)
-            .await?;
+        sqlx::query(r#"UPDATE users SET status = $1 WHERE user_id = $2"#)
+            .bind(status)
+            .bind(user_id.0 as i64)
+            .execute(&self.pool).await?;
         Ok(())
     }
 
     pub async fn get_users_with_requested_access(&self) -> Result<Vec<User>> {
-        let filter = doc! { "status": UserStatus::Requested as u32 };
-        let users = self
-            .users_collection()
-            .find(filter, None)
-            .await?
-            .try_collect()
-            .await?;
+        let users = sqlx::query(r#"SELECT * FROM users WHERE status = $1"#)
+            .bind(UserStatus::Requested)
+            .fetch_all(&self.pool).await?
+            .into_iter().map(|row| FromRow::from_row(&row))
+            .flatten().collect();
         Ok(users)
     }
 
     pub async fn get_profile(&self, public_key: &str) -> Result<Profile> {
-        let filter = doc!{ "public_key": public_key };
-        let profile = self.profiles_collection().find_one(filter, None).await?.ok_or(anyhow!("Could not find profile in database"))?;
-        Ok(profile)
+        let row = sqlx::query(r#"SELECT * FROM profiles WHERE public_key = $1"#)
+            .bind(public_key)
+            .fetch_one(&self.pool).await?;
+        Ok(Profile::from_row(&row)?)
     }
 }

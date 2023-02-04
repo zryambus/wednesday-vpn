@@ -8,4 +8,6 @@ services:
       - POSTGRES_DB=${POSTGRES_DB} #optional (specify default database instead of $POSTGRES_DB)
     ports:
       - "5434:5432"
+    volumes:
+      - ./pgdata-dev:/var/lib/postgresql/data
     restart: always

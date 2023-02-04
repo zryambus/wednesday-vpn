@@ -9,5 +9,7 @@ RUN cargo build --release --lib
 
 COPY src/ /tmp/wg/src/
 COPY proto/ /tmp/wg/proto/
+COPY migrations /tmp/wg/migrations
 COPY build.rs /tmp/wg/
+COPY sqlx-data.json /tmp/wg/sqlx-data.json
 RUN cargo build --release 

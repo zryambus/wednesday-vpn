@@ -14,7 +14,7 @@ clap = { version = "=4.1.4", features = ["derive"] }
 # mongodb = { version = "=2.3.1", default-features = false, features = ["tokio-runtime"] }
 # bb8-postgres = "=0.8.1"
 # bb8 = "=0.8.0"
-sqlx = { version = "=0.6.2", features = ["postgres", "uuid", "ipnetwork", "runtime-tokio-rustls"] }
+sqlx = { version = "=0.6.2", features = ["postgres", "uuid", "ipnetwork", "runtime-tokio-rustls", "offline"] }
 postgres-types = { version = "=0.2.4", features = ["derive", "with-cidr-0_2"] }
 futures = "=0.3.26"
 tokio = { version = "=1.25.0", features = ["full"]}

@@ -1,8 +1,12 @@
 version: '3'
 
 services:
-  mongo:
-    image: mongo
+  postgres:
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER=wednesday
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=wednesday_vpn
   wgc:
     image: ivolchenkov/wgc
     ports:
@@ -14,6 +18,6 @@ services:
     image: ivolchenkov/wgb
     depends_on:
       - wgc
-      - mongo
+      - postgres
     environment:
       - APP_endpoint=192.168.3.8

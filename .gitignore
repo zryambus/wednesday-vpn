@@ -1,2 +1,4 @@
 /target
 config.yaml
+sqlx-data.json
+docker-compose.yml
