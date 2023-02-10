@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use ipnet::IpAdd;
 use serde::{Deserialize, Serialize};
 use teloxide::prelude::*;
-use sqlx::{Pool, postgres::Postgres, FromRow, types::ipnetwork::*, Row};
+use sqlx::{Pool, postgres::Postgres, FromRow, types::{ipnetwork::*, chrono::*}, Row};
 
 use crate::{
     cfg::CfgPtr,
@@ -76,6 +76,14 @@ impl FromRow<'_, sqlx::postgres::PgRow> for User {
             status: row.get::<UserStatus, _>("status"),
         })
     }
+}
+
+#[derive(Debug, FromRow)]
+pub struct Statistics {
+    pub ip: std::net::IpAddr,
+    pub timestamp: DateTime<Utc>,
+    pub rx: usize,
+    pub tx: usize,
 }
 
 #[derive(Clone)]

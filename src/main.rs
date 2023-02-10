@@ -5,6 +5,7 @@ mod rpc;
 mod statistics;
 mod storage;
 mod wireguard;
+mod statistics_collector;
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -27,6 +28,8 @@ fn main() -> Result<()> {
 
         control_client::start_wireguard_server(&service_config).await?;
         control_client::sync_config(&storage, &service_config).await?;
+
+        statistics_collector::run_collector();
 
         Dispatcher::builder(bot, handlers::get_handler(service_config.clone()))
             .dependencies(dptree::deps![

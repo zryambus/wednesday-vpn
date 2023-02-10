@@ -2,3 +2,4 @@
 config.yaml
 sqlx-data.json
 docker-compose.yml
+/pgdata-dev/*

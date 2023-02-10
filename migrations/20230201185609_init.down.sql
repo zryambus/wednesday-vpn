@@ -7,3 +7,6 @@ DROP TABLE invites;
 DROP TABLE users;
 
 DROP TYPE user_status;
+
+DROP TABLE statistics;
+
